@@ -8,8 +8,8 @@ except RuntimeError:
     ReadOnlyPasswordHashWidget = None
 
 from django.forms import (
-    TextInput, DateInput, FileInput, CheckboxInput, MultiWidget, ClearableFileInput,
-    Select, RadioSelect, CheckboxSelectMultiple, NumberInput, EmailInput, URLInput
+    TextInput, DateInput, FileInput, CheckboxInput, MultiWidget,
+    ClearableFileInput, Select, RadioSelect, CheckboxSelectMultiple, SelectMultiple
 )
 # Django 1.9 moved SelectDateWidget to django.forms.widget from
 # django.forms.extras. Django 2.0 will remove the old import location.
@@ -166,7 +166,6 @@ class FormRenderer(BaseRenderer):
         if DBS3_SET_REQUIRED_SET_DISABLED and self.form.empty_permitted:
             self.set_required = False
 
-        self.error_types = kwargs.get('error_types', 'non_field_errors')
         self.error_css_class = kwargs.get('error_css_class', None)
         self.required_css_class = kwargs.get('required_css_class', None)
         self.bound_css_class = kwargs.get('bound_css_class', None)
@@ -202,16 +201,14 @@ class FormRenderer(BaseRenderer):
                 form_errors += field.errors
         return form_errors
 
-    def render_errors(self, error_types='all'):
-        form_errors = []
-        if error_types == 'all':
+    def render_errors(self, type='all'):
+        form_errors = None
+        if type == 'all':
             form_errors = self.get_fields_errors() + self.form.non_field_errors()
-        elif error_types == 'field_errors':
+        elif type == 'fields':
             form_errors = self.get_fields_errors()
-        elif error_types == 'non_field_errors':
+        elif type == 'non_fields':
             form_errors = self.form.non_field_errors()
-        elif error_types and error_types != 'none':
-            raise Exception('Illegal value "{}" for error_types.')
 
         if form_errors:
             return render_template_file(
@@ -220,14 +217,14 @@ class FormRenderer(BaseRenderer):
                     'errors': form_errors,
                     'form': self.form,
                     'layout': self.layout,
-                    'error_types': error_types,
+                    'type': type,
                 }
             )
 
         return ''
 
     def _render(self):
-        return self.render_errors(self.error_types) + self.render_fields()
+        return self.render_errors() + self.render_fields()
 
 
 class FieldRenderer(BaseRenderer):
@@ -255,14 +252,12 @@ class FieldRenderer(BaseRenderer):
         self.field_help = text_value(mark_safe(field.help_text)) if self.show_help and field.help_text else ''
         self.field_errors = [conditional_escape(text_value(error)) for error in field.errors]
 
-        self.label = kwargs.get('label', field.label)
-
         if 'placeholder' in kwargs:
             # Find the placeholder in kwargs, even if it's empty
             self.placeholder = kwargs['placeholder']
         elif get_bootstrap_setting('set_placeholder'):
             # If not found, see if we set the label
-            self.placeholder = self.label
+            self.placeholder = field.label
         else:
             # Or just set it to empty
             self.placeholder = ''
@@ -327,6 +322,10 @@ class FieldRenderer(BaseRenderer):
             classes = add_css_class(classes, 'form-control', prepend=True)
             # For these widget types, add the size class here
             classes = add_css_class(classes, self.get_size_class())
+        if isinstance(widget, (Select, SelectMultiple)):
+            # Render this is a static control
+            classes = add_css_class(classes, 'selectpicker', prepend=True)
+            widget.attrs['data-live-search'] = "true"
         widget.attrs['class'] = classes
 
     def add_placeholder_attrs(self, widget=None):
@@ -392,7 +391,7 @@ class FieldRenderer(BaseRenderer):
     def put_inside_label(self, html):
         content = '{field} {label}'.format(
             field=html,
-            label=self.label,
+            label=self.field.label,
         )
         return render_label(
             content=mark_safe(content),
@@ -448,8 +447,7 @@ class FieldRenderer(BaseRenderer):
         return html
 
     def make_input_group(self, html):
-        if (self.addon_before or self.addon_after) and isinstance(
-                self.widget, (TextInput, NumberInput, EmailInput, URLInput, DateInput, Select)):
+        if (self.addon_before or self.addon_after) and isinstance(self.widget, (TextInput, DateInput, Select)):
             before = '<span class="{input_class}">{addon}</span>'.format(
                 input_class=self.addon_before_class, addon=self.addon_before) if self.addon_before else ''
             after = '<span class="{input_class}">{addon}</span>'.format(
@@ -505,7 +503,7 @@ class FieldRenderer(BaseRenderer):
         if isinstance(self.widget, CheckboxInput):
             label = None
         else:
-            label = self.label
+            label = self.field.label
         if self.layout == 'horizontal' and not label:
             return mark_safe('&#160;')
         return label
